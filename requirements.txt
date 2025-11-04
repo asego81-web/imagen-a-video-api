@@ -1,0 +1,4 @@
+flask
+pillow
+huggingface_hub
+gunicorn
