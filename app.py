@@ -1,92 +1,97 @@
 from flask import Flask, request, render_template_string
-import threading, time, os, base64
 from huggingface_hub import InferenceClient
 from PIL import Image
 from io import BytesIO
+import base64, os, threading, time
 
 app = Flask(__name__)
 client = InferenceClient(token=os.getenv("HF_TOKEN"))
 
-# Estado
-p = 5
-msg = "¡Sube foto y texto!"
-video = ""
+# Variables globales
+progreso = 0
+mensaje = "¡Sube foto + texto!"
+video_b64 = None
 
-HTML = """
+HTML = '''
 <!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AREPA-VIDEO</title>
-<style>
-  body{background:#000;color:lime;font:20px Arial;text-align:center;padding:20px}
-  input,button{width:90%;padding:15px;margin:10px;border-radius:15px;font-size:20px}
-  input{background:#111;color:white;border:2px solid lime}
-  button{background:lime;color:black}
-  .bar{height:40px;background:#333;border-radius:20px;overflow:hidden;margin:20px}
-  .fill{height:100%;width:%d%%;background:orange}
-  video{max-width:100%;border-radius:20px}
-</style></head><body>
-<h1 style="color:orange">AREPA-VIDEO</h1>
-<p>%s</p>
-<div class="bar"><div class="fill"></div></div>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AREPA-VIDEO</title>
+  <style>
+    body {font-family:Arial;background:#000;color:lime;text-align:center;padding:20px}
+    input,button {width:90%;padding:15px;margin:10px;font-size:20px;border-radius:15px}
+    input {background:#111;color:white;border:2px solid lime}
+    button {background:lime;color:black;font-weight:bold}
+    .bar {height:40px;background:#333;border-radius:20px;overflow:hidden;margin:20px}
+    .fill {height:100%;width:{{progreso}}%;background:orange;transition:1s}
+    video {max-width:100%;border-radius:20px;margin:20px}
+    .dl {background:lime;color:black;padding:15px 30px;border-radius:15px;text-decoration:none}
+  </style>
+</head>
+<body>
+  <h1 style="color:orange">AREPA-VIDEO IA</h1>
+  <p style="font-size:22px">{{mensaje}}</p>
+  <div class="bar"><div class="fill"></div></div>
 
-<form method=post enctype=multipart/form-data>
-  <input type=file name=f required>
-  <input type=text name=t placeholder="Ej: arepas volando" required>
-  <button>¡VIDEO!</button>
-</form>
+  <form method="post" enctype="multipart/form-data">
+    <input type="file" name="foto" accept="image/*" required>
+    <input type="text" name="texto" placeholder="Ej: arepas volando en la luna" required>
+    <button>¡CREAR VIDEO!</button>
+  </form>
 
-%s
-<script>
-  setTimeout(() => location.reload(), 12000); // 12 seg seguros
-</script>
-</body></html>
-""" % (p, msg, '<video controls><source src="'+video+'" type="video/mp4"></video><br><a href="'+video+'" download="arepa.mp4" style="background:lime;color:black;padding:15px 30px;border-radius:15px;text-decoration:none">DESCARGAR</a>' if video else "")
+  {% if video %}
+    <video controls><source src="data:video/mp4;base64,{{video}}" type="video/mp4"></video><br>
+    <a href="data:video/mp4;base64,{{video}}" download="arepa.mp4" class="dl">DESCARGAR</a>
+  {% endif %}
 
-def crear():
-    global p, msg, video, HTML
-    p = 20; msg = "Foto recibida..."; actualizar()
-    time.sleep(2)
-    p = 50; msg = "IA cocinando arepas..."; actualizar()
-    time.sleep(2)
-    
-    img = Image.open(request.files["f"].stream)
-    buf = BytesIO(); img.save(buf, "PNG")
-    
-    vid = client.image_to_video(buf.getvalue(), request.form["t"])
-    video = "data:video/mp4;base64," + base64.b64encode(vid).decode()
-    p = 100; msg = "¡VIDEO LISTO! 🎉"
-    actualizar()
+  <script>
+    setTimeout(() => location.reload(), 12000);
+  </script>
+</body>
+</html>
+'''
 
-def actualizar():
-    global HTML
-    HTML = """
-    <!DOCTYPE html>
-    <html><head><meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AREPA-VIDEO</title>
-    <style>
-      body{background:#000;color:lime;font:20px Arial;text-align:center;padding:20px}
-      input,button{width:90%;padding:15px;margin:10px;border-radius:15px;font-size:20px}
-      input{background:#111;color:white;border:2px solid lime}
-      button{background:lime;color:black}
-      .bar{height:40px;background:#333;border-radius:20px;overflow:hidden;margin:20px}
-      .fill{height:100%;width:%d%%;background:orange}
-      video{max-width:100%;border-radius:20px}
-    </style></head><body>
-    <h1 style="color:orange">AREPA-VIDEO</h1>
-    <p>%s</p>
-    <div class="bar"><div class="fill"></div></div>
-    %s
-    <script>
-      setTimeout(() => location.reload(), 12000);
-    </script>
-    </body></html>
-    """ % (p, msg, '<video controls><source src="'+video+'" type="video/mp4"></video><br><a href="'+video+'" download="arepa.mp4" style="background:lime;color:black;padding:15px 30px;border-radius:15px;text-decoration:none">DESCARGAR</a>' if video else "<form method=post enctype=multipart/form-data><input type=file name=f required><input type=text name=t placeholder='Ej: arepas volando' required><button>¡VIDEO!</button></form>")
+def generar_video():
+    global progreso, mensaje, video_b64
+    try:
+        # 1. Recibir archivo
+        file = request.files['foto']
+        prompt = request.form['texto']
+        progreso = 20
+        mensaje = "Foto recibida... 20%"
 
-@app.route("/", methods=["GET","POST"])
+        # 2. Leer imagen
+        img_bytes = file.read()
+        img = Image.open(BytesIO(img_bytes)).convert("RGB")
+        buf = BytesIO()
+        img.save(buf, "PNG")
+        img_png = buf.getvalue()
+
+        progreso = 50
+        mensaje = "IA cocinando arepas... 50%"
+
+        # 3. Generar video
+        video_bytes = client.image_to_video(img_png, prompt)
+        video_b64 = base64.b64encode(video_bytes).decode()
+
+        progreso = 100
+        mensaje = "¡VIDEO LISTO! 🎉"
+    except Exception as e:
+        mensaje = f"Error: {e}"
+        progreso = 0
+
+@app.route("/", methods=["GET", "POST"])
 def home():
-    global HTML
+    global progreso, mensaje, video_b64
+
     if request.method == "POST":
-        threading.Thread(target=crear).start()
-        p = 10; msg = "¡Em
+        threading.Thread(target=generar_video).start()
+        progreso = 10
+        mensaje = "¡Empezando! 10%"
+
+    return render_template_string(HTML, progreso=progreso, mensaje=mensaje, video=video_b64)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
