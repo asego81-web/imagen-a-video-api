@@ -1,114 +1,108 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, jsonify
+import threading
+import time
+import os
 from huggingface_hub import InferenceClient
 from PIL import Image
 from io import BytesIO
 import base64
-import os
-import threading
-import time
 
 app = Flask(__name__)
 client = InferenceClient(token=os.getenv("HF_TOKEN"))
 
-# Estado global para el progreso
-generation_status = {"status": "", "video_url": None}
+# VARIABLES GLOBALES
+video_listo = None
+progreso = 0
+mensaje = "Listo para generar"
 
 HTML = '''
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Video IA Móvil</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AREPA-VIDEO IA</title>
   <style>
-    body { background:#000; color:#fff; padding:20px; text-align:center; font-family:Arial; }
-    h1 { font-size:24px; background:linear-gradient(90deg,#00ff88,#ff00aa); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-    .upload { border:2px dashed #444; padding:40px; border-radius:16px; margin:20px 0; background:#111; }
-    input, button { width:100%; padding:16px; margin:8px 0; border-radius:12px; font-size:18px; }
-    input { background:#222; color:#fff; border:none; }
-    button { background:linear-gradient(45deg,#00ff88,#ff00aa); color:#000; border:none; font-weight:bold; }
-    video { width:100%; max-width:400px; border-radius:16px; margin:20px 0; }
-    .download { background:#10b981; color:#fff; padding:12px 20px; border-radius:12px; text-decoration:none; }
-    .status { color:#00ff88; font-weight:bold; margin:20px 0; }
-    .loading { color:#ffaa00; animation: pulse 1.5s infinite; }
-    @keyframes pulse { 0% { opacity:0.6; } 50% { opacity:1; } 100% { opacity:0.6; } }
+    body{font-family:Arial;background:#000;color:#0f0;text-align:center;padding:20px}
+    h1{background:linear-gradient(90deg,#f90,#0f0);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .bar{width:90%;height:30px;background:#333;margin:20px auto;border-radius:15px;overflow:hidden}
+    .fill{height:100%;width:{{progreso}}%;background:linear-gradient(90deg,#f90,#0f0);transition:1s}
+    button,input{padding:15px;font-size:18px;margin:10px;width:90%;border-radius:15px;border:none}
+    button{background:#0f0;color:#000;font-weight:bold}
+    input{background:#222;color:#fff}
+    video{max-width:100%;border-radius:20px;margin:20px 0}
+    .download{background:#0f0;color:#000;padding:15px 30px;border-radius:15px;text-decoration:none}
   </style>
 </head>
 <body>
-  <h1>VIDEO IA MÓVIL</h1>
-  <p>Sube foto + texto → Video mágico</p>
+  <h1>AREPA-VIDEO IA</h1>
+  <p>{{mensaje}}</p>
+  <div class="bar"><div class="fill"></div></div>
   
-  {% if status %}
-    <div class="status {{ 'loading' if 'GENERANDO' in status else '' }}">{{ status }}</div>
-  {% endif %}
-  
-  <form method="post" enctype="multipart/form-data">
-    <div class="upload">
-      <input type="file" name="image" accept="image/*" required>
-    </div>
-    <input type="text" name="prompt" placeholder="Ej: haz que baile flamenco en la luna" required>
-    <button type="submit">Generar Video</button>
+  <form id="form">
+    <input type="file" name="image" accept="image/*" required>
+    <input type="text" name="prompt" placeholder="Ej: haz que baile arepas voladoras" required>
+    <button type="submit">¡GENERAR VIDEO!</button>
   </form>
   
-  {% if video_url %}
-    <video controls>
-      <source src="{{ video_url }}" type="video/mp4">
-    </video>
-    <br>
-    <a href="{{ video_url }}" download="video-ia.mp4" class="download">DESCARGAR</a>
-  {% endif %}
-  
+  <div id="resultado"></div>
+
   <script>
-    // Auto-recarga cada 5s si está generando
-    setInterval(() => {
-      if (document.querySelector('.loading')) {
-        location.reload();
-      }
-    }, 5000);
+    setInterval(() => location.reload(), 8000); // recarga cada 8 seg
+
+    document.getElementById('form').onsubmit = async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      await fetch('/', {method:'POST', body:form});
+    };
   </script>
 </body>
 </html>
 '''
 
-def generate_video(file, prompt):
-    global generation_status
+def generar_en_fondo(imagen, prompt):
+    global video_listo, progreso, mensaje
     try:
-        generation_status["status"] = "GENERANDO VIDEO... (15-30 seg)"
-        img = Image.open(file.stream).convert("RGB")
-        img_byte = BytesIO()
-        img.save(img_byte, format="PNG")
-        img_byte = img_byte.getvalue()
+        progreso = 10
+        mensaje = "Subiendo imagen... 10%"
+        img = Image.open(imagen).convert("RGB")
         
-        generation_status["status"] = "ENVIANDO A IA... ESPERA"
+        progreso = 30
+        mensaje = "Enviando a la IA... 30%"
+        buf = BytesIO()
+        img.save(buf, "PNG")
+        
+        progreso = 60
+        mensaje = "¡La IA está cocinando el video! 60%"
         video_bytes = client.image_to_video(
-            image=img_byte,
+            image=buf.getvalue(),
             prompt=prompt,
             model="stabilityai/stable-video-diffusion-img2vid-xt",
-            num_inference_steps=25
+            num_inference_steps=20
         )
         
-        video_b64 = base64.b64encode(video_bytes).decode()
-        generation_status["video_url"] = f"data:video/mp4;base64,{video_b64}"
-        generation_status["status"] = "¡VIDEO LISTO!"
+        progreso = 100
+        mensaje = "¡VIDEO LISTO! Refrescando..."
+        b64 = base64.b64encode(video_bytes).decode()
+        video_listo = f"data:video/mp4;base64,{b64}"
     except Exception as e:
-        generation_status["status"] = f"ERROR: {str(e)}"
+        mensaje = f"Error: {e}"
+        progreso = 0
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
-    global generation_status
+    global video_listo, progreso, mensaje
+    
     if request.method == 'POST':
         file = request.files['image']
         prompt = request.form['prompt']
-        # Generar en hilo separado
-        thread = threading.Thread(target=generate_video, args=(file, prompt))
-        thread.start()
-        return render_template_string(HTML, status=generation_status["status"])
+        threading.Thread(target=generar_en_fondo, args=(file.stream, prompt)).start()
+        progreso = 5
+        mensaje = "¡Arepa en marcha! 5%"
     
-    return render_template_string(
-        HTML, 
-        status=generation_status["status"], 
-        video_url=generation_status["video_url"]
-    )
+    video_tag = f'<video controls><source src="{video_listo}" type="video/mp4"></video><br><a href="{video_listo}" download="arepa-video.mp4" class="download">DESCARGAR</a>' if video_listo else ''
+    
+    return render_template_string(HTML, progreso=progreso, mensaje=mensaje) + video_tag
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
