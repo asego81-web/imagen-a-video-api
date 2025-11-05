@@ -1,84 +1,70 @@
 from flask import Flask, request, render_template_string
+import os, base64
 from huggingface_hub import InferenceClient
 from PIL import Image
 from io import BytesIO
-import base64, os
 
 app = Flask(__name__)
 client = InferenceClient(token=os.getenv("HF_TOKEN"))
 
-HTML_BASE = '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AREPA-VIDEO</title>
-  <style>
-    body {font-family:Arial;background:#000;color:lime;text-align:center;padding:20px}
-    h1 {font-size:30px;color:orange}
-    input,button {width:90%;padding:15px;margin:10px;border-radius:15px;font-size:20px}
-    input {background:#111;color:white;border:2px solid lime}
-    button {background:lime;color:black;font-weight:bold}
-    .bar {height:40px;background:#333;border-radius:20px;overflow:hidden;margin:20px}
-    .fill {height:100%;width:{{progreso}}%;background:orange;transition:1s}
-    video {max-width:100%;border-radius:20px;margin:20px}
-    .dl {background:lime;color:black;padding:15px 30px;border-radius:15px;text-decoration:none}
-  </style>
-</head>
-<body>
-  <h1>AREPA-VIDEO IA</h1>
-  <p style="font-size:22px">{{mensaje}}</p>
-  <div class="bar"><div class="fill"></div></div>
+HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AREPA-VIDEO</title>
+<style>
+  body{background:#000;color:#0f0;font:20px Arial;text-align:center;padding:20px}
+  h1{color:orange;font-size:40px}
+  input,button{width:90%;padding:18px;margin:12px;font-size:22px;border-radius:20px}
+  input{background:#111;color:#fff;border:3px solid #0f0}
+  button{background:#0f0;color:#000;font-weight:bold}
+  .bar{height:50px;background:#333;border-radius:25px;overflow:hidden;margin:30px}
+  .fill{height:100%;width:0%;background:orange;transition:2s}
+  video{max-width:100%;border-radius:25px;margin:30px}
+  .dl{background:#0f0;color:#000;padding:18px 40px;border-radius:20px;text-decoration:none;font-size:20px}
+</style></head><body>
+<h1>AREPA-VIDEO IA</h1>
+<p id="msg">¡Sube foto + texto!</p>
+<div class="bar"><div class="fill" id="fill"></div></div>
 
-  <form method="post" enctype="multipart/form-data">
-    <input type="file" name="foto" accept="image/*" required>
-    <input type="text" name="prompt" placeholder="Ej: arepas volando en la luna" required>
-    <button>¡GENERAR VIDEO!</button>
-  </form>
+<form method="post" enctype="multipart/form-data" id="form">
+  <input type="file" name="f" accept="image/*" required>
+  <input type="text" name="t" placeholder="Ej: arepas bailando salsa" required>
+  <button>¡VIDEO!</button>
+</form>
 
-  {% if video %}
-    <video controls><source src="data:video/mp4;base64,{{video}}" type="video/mp4"></video><br>
-    <a href="data:video/mp4;base64,{{video}}" download="arepa.mp4" class="dl">DESCARGAR</a>
-  {% endif %}
-</body>
-</html>
-'''
+<div id="result"></div>
 
-@app.route("/", methods=["GET", "POST"])
+<script>
+  const form = document.getElementById('form');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const data = new FormData(form);
+    document.getElementById('msg').innerText = '10% Subiendo...';
+    document.getElementById('fill').style.width = '10%';
+    
+    const r = await fetch('/', {method:'POST', body:data});
+    const html = await r.text();
+    document.body.innerHTML = html;
+  };
+</script>
+</body></html>"""
+
+@app.route("/", methods=["GET","POST"])
 def home():
-    if request.method == "POST":
-        # 1. Recibir datos
-        file = request.files["foto"]
-        prompt = request.form["prompt"]
+    if request.method == "GET":
+        return HTML
 
-        # 2. Progreso 20%
-        html = HTML_BASE.replace("{{progreso}}", "20").replace("{{mensaje}}", "Subiendo foto... 20%")
-        html = html.replace("{% if video %}...{% endif %}", "")
-        yield html
+    # POST
+    img = Image.open(request.files["f"].stream).convert("RGB")
+    buf = BytesIO(); img.save(buf, "PNG")
+    
+    video = client.image_to_video(buf.getvalue(), request.form["t"])
+    b64 = base64.b64encode(video).decode()
 
-        # 3. Leer imagen
-        img = Image.open(file.stream).convert("RGB")
-        buf = BytesIO()
-        img.save(buf, "PNG")
-        img_data = buf.getvalue()
-
-        # 4. Progreso 50%
-        html = HTML_BASE.replace("{{progreso}}", "50").replace("{{mensaje}}", "Cocinando video... 50%")
-        html = html.replace("{% if video %}...{% endif %}", "")
-        yield html
-
-        # 5. Generar video
-        video_bytes = client.image_to_video(img_data, prompt)
-        video_b64 = base64.b64encode(video_bytes).decode()
-
-        # 6. Progreso 100%
-        html = HTML_BASE.replace("{{progreso}}", "100").replace("{{mensaje}}", "¡VIDEO LISTO! 🎉")
-        html = html.replace("{{video}}", video_b64)
-        yield html
-
-    else:
-        return HTML_BASE.replace("{{progreso}}", "0").replace("{{mensaje}}", "¡Sube foto + texto!").replace("{% if video %}...{% endif %}", "")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    return f"""
+    <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>body{{background:#000;color:#0f0;text-align:center;padding:20px;font:20px Arial}}
+    video{{max-width:100%;border-radius:25px;margin:30px}}
+    .dl{{background:#0f0;color:#000;padding:18px 40px;border-radius:20px;text-decoration:none;font-size:22px}}
+    </style></head><body>
+    <h1 style="color:orange">¡VIDEO LISTO! 🎉</h1>
+    <video controls><source src="data:video/mp4;base64,{b64}" type="video/mp4"></video
