@@ -7,73 +7,86 @@ from io import BytesIO
 app = Flask(__name__)
 client = InferenceClient(token=os.getenv("HF_TOKEN"))
 
-estado = {"texto": "¡Sube una foto!", "porc": 0, "video": ""}
+# Estado
+p = 5
+msg = "¡Sube foto y texto!"
+video = ""
 
 HTML = """
 <!DOCTYPE html>
-<html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AREPA-VIDEO</title>
 <style>
-  body{font-family:Arial;background:#000;color:lime;text-align:center;padding:20px}
-  h1{font-size:30px;color:orange}
-  input,button{width:90%;padding:15px;margin:10px;font-size:20px;border-radius:15px}
-  input{background:#222;color:white;border:none}
-  button{background:lime;color:black;font-weight:bold}
-  .barra{height:30px;background:#333;border-radius:15px;overflow:hidden;margin:20px}
-  .fill{height:100%;width:{{porc}}%;background:orange;transition:1s}
-  video{max-width:100%;border-radius:20px;margin:20px}
-  .dl{background:lime;color:black;padding:15px 30px;border-radius:15px;text-decoration:none}
+  body{background:#000;color:lime;font:20px Arial;text-align:center;padding:20px}
+  input,button{width:90%;padding:15px;margin:10px;border-radius:15px;font-size:20px}
+  input{background:#111;color:white;border:2px solid lime}
+  button{background:lime;color:black}
+  .bar{height:40px;background:#333;border-radius:20px;overflow:hidden;margin:20px}
+  .fill{height:100%;width:%d%%;background:orange}
+  video{max-width:100%;border-radius:20px}
 </style></head><body>
-<h1>AREPA-VIDEO</h1>
-<p style="font-size:22px">{{texto}}</p>
-<div class="barra"><div class="fill"></div></div>
+<h1 style="color:orange">AREPA-VIDEO</h1>
+<p>%s</p>
+<div class="bar"><div class="fill"></div></div>
 
 <form method=post enctype=multipart/form-data>
-  <input type=file name=foto accept="image/*" required>
-  <input type=text name=idea placeholder="Ej: bailando arepas voladoras" required>
-  <button>¡CREAR VIDEO!</button>
+  <input type=file name=f required>
+  <input type=text name=t placeholder="Ej: arepas volando" required>
+  <button>¡VIDEO!</button>
 </form>
 
-{% if video %}
-<video controls><source src="{{video}}" type="video/mp4"></video><br>
-<a href="{{video}}" download="arepa.mp4" class="dl">DESCARGAR</a>
-{% endif %}
-
-<!-- SOLO REFRESCA CUANDO TRABAJA -->
+%s
 <script>
-  setTimeout(() => location.reload(), 15000);  // 15 segundos seguros
+  setTimeout(() => location.reload(), 12000); // 12 seg seguros
 </script>
 </body></html>
-"""
+""" % (p, msg, '<video controls><source src="'+video+'" type="video/mp4"></video><br><a href="'+video+'" download="arepa.mp4" style="background:lime;color:black;padding:15px 30px;border-radius:15px;text-decoration:none">DESCARGAR</a>' if video else "")
 
-def hacer_video(foto, idea):
-    global estado
-    estado["texto"] = "Subiendo foto... 20%"
-    estado["porc"] = 20
-    time.sleep(1)
+def crear():
+    global p, msg, video, HTML
+    p = 20; msg = "Foto recibida..."; actualizar()
+    time.sleep(2)
+    p = 50; msg = "IA cocinando arepas..."; actualizar()
+    time.sleep(2)
     
-    img = Image.open(foto).convert("RGB")
-    buf = BytesIO()
-    img.save(buf, "PNG")
+    img = Image.open(request.files["f"].stream)
+    buf = BytesIO(); img.save(buf, "PNG")
     
-    estado["texto"] = "La IA está cocinando... 60%"
-    estado["porc"] = 60
-    time.sleep(1)
-    
-    video = client.image_to_video(buf.getvalue(), idea)
-    b64 = base64.b64encode(video).decode()
-    estado["video"] = f"data:video/mp4;base64,{b64}"
-    estado["texto"] = "¡VIDEO LISTO! 🎉"
-    estado["porc"] = 100
+    vid = client.image_to_video(buf.getvalue(), request.form["t"])
+    video = "data:video/mp4;base64," + base64.b64encode(vid).decode()
+    p = 100; msg = "¡VIDEO LISTO! 🎉"
+    actualizar()
+
+def actualizar():
+    global HTML
+    HTML = """
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AREPA-VIDEO</title>
+    <style>
+      body{background:#000;color:lime;font:20px Arial;text-align:center;padding:20px}
+      input,button{width:90%;padding:15px;margin:10px;border-radius:15px;font-size:20px}
+      input{background:#111;color:white;border:2px solid lime}
+      button{background:lime;color:black}
+      .bar{height:40px;background:#333;border-radius:20px;overflow:hidden;margin:20px}
+      .fill{height:100%;width:%d%%;background:orange}
+      video{max-width:100%;border-radius:20px}
+    </style></head><body>
+    <h1 style="color:orange">AREPA-VIDEO</h1>
+    <p>%s</p>
+    <div class="bar"><div class="fill"></div></div>
+    %s
+    <script>
+      setTimeout(() => location.reload(), 12000);
+    </script>
+    </body></html>
+    """ % (p, msg, '<video controls><source src="'+video+'" type="video/mp4"></video><br><a href="'+video+'" download="arepa.mp4" style="background:lime;color:black;padding:15px 30px;border-radius:15px;text-decoration:none">DESCARGAR</a>' if video else "<form method=post enctype=multipart/form-data><input type=file name=f required><input type=text name=t placeholder='Ej: arepas volando' required><button>¡VIDEO!</button></form>")
 
 @app.route("/", methods=["GET","POST"])
-def inicio():
+def home():
+    global HTML
     if request.method == "POST":
-        threading.Thread(target=hacer_video, 
-                        args=(request.files["foto"].stream, request.form["idea"])).start()
-        estado["texto"] = "¡Arepa en marcha! 5%"
-        estado["porc"] = 5
-    
-    return render_template_string(HTML, **estado)
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+        threading.Thread(target=crear).start()
+        p = 10; msg = "¡Em
